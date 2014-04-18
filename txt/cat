@@ -1,0 +1,14 @@
+For every line of stdin, print that line to stdout.
+
+Example:
+
+Input:
+Line 0
+Line 1
+Line 2
+
+Output:
+Line 0
+Line 1
+Line 2
+

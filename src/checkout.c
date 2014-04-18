@@ -1,0 +1,95 @@
+/*
+ * runContest.c
+ *
+ * To be run with setuid to contest
+ *
+ */
+
+#include <errno.h>
+#include <fcntl.h>
+#include <pwd.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include "runContest.h"
+
+#define STDIN  0
+#define STDOUT 1
+#define STDERR 2
+
+#define CHECK_ERROR(func, error) do { if((func) == -1) { error; } } while(0)
+#define CHECK_TRUE(func, error) do { if(func) { error; } } while(0)
+
+char cprog[] = "/proj/contest/grader/bin/checkout.py";
+
+int
+forkProg(char **argv, int infd, int outfd, int asUser)
+{
+  int pid, ec = 1;
+  pid = fork();
+  if (pid == -1) {
+    return -1;
+  } else if (pid == 0) {
+    if(asUser)
+      CHECK_ERROR(seteuid(getuid()), goto __error);
+    else
+      CHECK_ERROR(setreuid(geteuid(),geteuid()), goto __error);
+
+    if(asUser)
+      CHECK_ERROR(close(STDERR), goto __error);
+    else
+      CHECK_ERROR(dup2(STDOUT,STDERR), goto __error);
+
+    CHECK_ERROR(dup2(outfd,STDOUT), goto __error);
+    CHECK_ERROR(dup2(infd,STDIN), goto __error);
+
+    if(!asUser)
+      CHECK_TRUE(errno = clearenv(), goto __error);
+    CHECK_ERROR(execvp(argv[0], argv), goto __error);
+  }
+  close(infd);
+  close(outfd);
+  return pid;
+__error:
+  fprintf(stderr, "Failure to fork %s: %s\n", argv[0], strerror(errno));
+  exit(-1);
+}
+
+int
+main(int argc, char **argv)
+{
+  char *checkout[4], uid[65];
+  int ppid = -1, cpid = -1, status;
+  if (argc !=  2) {
+    fprintf(stderr,"%s [PROBLEM]\n",argv[0]);
+    return 1;
+  }
+
+  sprintf(uid, "%d", getuid());
+
+  checkout[0] = cprog;
+  checkout[1] = argv[1];
+  checkout[2] = uid;
+  checkout[3] = NULL;
+
+  CHECK_ERROR(cpid = forkProg(checkout, STDIN, STDOUT, 0), goto __error);
+
+  /* clean-up */
+  waitpid(cpid, &status, 0);
+
+  return status;
+__error:
+  fprintf(stderr, "Failed to grade: %s\n", strerror(errno));
+  if(cpid != -1) {
+    kill(cpid, 9);
+    waitpid(cpid, NULL, WNOHANG);
+  }
+  return 1;
+}
+
